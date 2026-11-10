@@ -1,0 +1,5 @@
+build/
+.vs/
+*.user
+__pycache__/
+tests/run_engine

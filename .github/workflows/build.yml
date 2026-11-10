@@ -1,0 +1,51 @@
+name: Build VST3
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]          # push a tag like v1.1.0 to also make a Release
+  workflow_dispatch:        # lets you press "Run workflow" by hand
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache JUCE (faster rebuilds)
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: juce-8.0.6-${{ hashFiles('CMakeLists.txt') }}
+
+      - name: Configure (downloads JUCE 8.0.6)
+        run: cmake -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $vst = Get-ChildItem build -Recurse -Directory -Filter *.vst3 | Select-Object -First 1
+          Copy-Item -Recurse $vst.FullName "dist/$($vst.Name)"
+          Copy-Item ".github/INSTALL.bat" "dist/INSTALL.bat"
+          Compress-Archive -Path dist/* -DestinationPath "$($vst.BaseName)-Windows.zip"
+          "PLUGIN=$($vst.BaseName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Upload (Actions tab)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PLUGIN }}-VST3-Windows-${{ github.run_number }}
+          path: dist
+
+      - name: Make a Release (only when you push a v* tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" "$env:PLUGIN-Windows.zip" --title "$env:PLUGIN ${{ github.ref_name }}" --generate-notes
